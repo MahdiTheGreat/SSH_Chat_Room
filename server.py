@@ -30,6 +30,7 @@ import paramiko
 from paramiko.py3compat import b, u, decodebytes
 import pandas as pd
 import threading
+import shlex
 
 # setup logging
 paramiko.util.log_to_file("demo_server.log")
@@ -65,11 +66,11 @@ class Server(paramiko.ServerInterface):
             return paramiko.AUTH_FAILED
         return paramiko.AUTH_SUCCESSFUL
 
-    def check_auth_publickey(self, username, key):
-        print("Auth attempt with key: " + u(hexlify(key.get_fingerprint())))
-        if (username == "robey") and (key == self.good_pub_key):
-            return paramiko.AUTH_SUCCESSFUL
-        return paramiko.AUTH_FAILED
+    # def check_auth_publickey(self, username, key):
+    #     print("Auth attempt with key: " + u(hexlify(key.get_fingerprint())))
+    #     if (username == "robey") and (key == self.good_pub_key):
+    #         return paramiko.AUTH_SUCCESSFUL
+    #     return paramiko.AUTH_FAILED
 
     def check_auth_gssapi_with_mic(
         self, username, gss_authenticated=paramiko.AUTH_FAILED, cc_file=None
@@ -113,7 +114,11 @@ class Server(paramiko.ServerInterface):
     ):
         return True
 
+
 def client_handler(client):
+    username=""
+    channel_open=True
+    chan=None
     try:
         t = paramiko.Transport(client, gss_kex=DoGSSAPIKeyExchange)
         t.set_gss_host(socket.getfqdn(""))
@@ -142,17 +147,46 @@ def client_handler(client):
             print("*** Client never asked for a shell.")
             sys.exit(1)
 
-        chan.send("\r\n\r\nWelcome to my dorky little BBS!\r\n\r\n")
-        chan.send(
-            "We are on fire all the time!  Hooray!  Candy corn for everyone!\r\n"
-        )
-        chan.send("Happy birthday to Robot Dave!\r\n\r\n")
-        chan.send("Username: ")
+        chan.send("\r\n\r\nWelcome!\r\n\r\n")
         f = chan.makefile("rU")
-        while True:
-         username = f.readline().strip("\r\n")
-         chan.send("\r\nI don't like you, " + username + ".\r\n")
-        # chan.close()
+        chan.send("log in please\n")
+        while channel_open:
+         command = f.readline().strip("\r\n")
+         parsed_command = shlex.split(command)
+         print(parsed_command)
+         if username!="":
+
+          while not len(messageBox[username]) == 0:
+              chan.send(messageBox[username].pop(0))
+
+          if len(parsed_command) > 2 and parsed_command[0] == "msg":
+              print("sending a message to someone")
+              receiver_username=parsed_command[1]
+              temp = user_records.query("user_id==@username")
+              if not temp.empty and (receiver_username in messageBox.keys()):
+                  messageBox[receiver_username].append(f"[{username}]: "+parsed_command[2])
+                  print("message to someone sent")
+                  chan.send("message send\n")
+
+          elif len(parsed_command) > 0 and parsed_command[0] == "logout":
+              print("loggin out someone")
+              del messageBox[username]
+              broad_cast(f"[{username}] logged out")
+              channel_open=False
+              chan.close()
+
+
+         elif len(parsed_command) > 2 and parsed_command[0] == "login" and username=="":
+             print("login in someone")
+             tempUserName=parsed_command[1]
+             tempPassword=parsed_command[2]
+             print()
+             temp = user_records.query("user_id==@tempUserName and password==@tempPassword")
+             if not temp.empty:
+              username=tempUserName
+              broad_cast(f"[{username}] logged in")
+              messageBox[username] = []
+              chan.send("logged in\n")
 
     except Exception as e:
         print("*** Caught exception: " + str(e.__class__) + ": " + str(e))
@@ -163,8 +197,20 @@ def client_handler(client):
             pass
         sys.exit(1)
 
+
+
+def broad_cast(message):
+ for key in messageBox.keys():
+  messageBox[key].append(message)
+
+
+
+
 DoGSSAPIKeyExchange = True
 user_records=pd.read_csv("UserRecords.csv")
+loggedInUsers=set()
+messageBox=dict()
+idToUsername=dict()
 
 # now connect
 try:

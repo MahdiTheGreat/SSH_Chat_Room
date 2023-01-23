@@ -1,7 +1,7 @@
-import pandas as pd
+import shlex
 
-user_records=pd.read_csv("UserRecords.csv")
-username="mahdi"
-password="1234q"
-temp=user_records.query("user_id==@username and password==@password")
-print()
+argString = "shh chat   -m  asdasdsdasa    user"
+temp=shlex.split(argString)
+
+if temp[0] =="shh" and temp[1] == "chat" and temp[3][0]=="@":
+    print("correct command")
