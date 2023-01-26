@@ -1,31 +1,7 @@
-#!/usr/bin/env python
-
-# Copyright (C) 2003-2007  Robey Pointer <robeypointer@gmail.com>
-#
-# This file is part of paramiko.
-#
-# Paramiko is free software; you can redistribute it and/or modify it under the
-# terms of the GNU Lesser General Public License as published by the Free
-# Software Foundation; either version 2.1 of the License, or (at your option)
-# any later version.
-#
-# Paramiko is distributed in the hope that it will be useful, but WITHOUT ANY
-# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
-# A PARTICULAR PURPOSE.  See the GNU Lesser General Public License for more
-# details.
-#
-# You should have received a copy of the GNU Lesser General Public License
-# along with Paramiko; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA.
-
-import base64
 from binascii import hexlify
-import os
 import socket
 import sys
-import threading
 import traceback
-
 import paramiko
 from paramiko.py3compat import b, u, decodebytes
 import pandas as pd
@@ -33,7 +9,7 @@ import threading
 import shlex
 
 # setup logging
-paramiko.util.log_to_file("demo_server.log")
+paramiko.util.log_to_file("server.log")
 
 host_key = paramiko.RSAKey(filename="test_rsa.key")
 # host_key = paramiko.DSSKey(filename='test_dss.key')
@@ -66,28 +42,9 @@ class Server(paramiko.ServerInterface):
             return paramiko.AUTH_FAILED
         return paramiko.AUTH_SUCCESSFUL
 
-    # def check_auth_publickey(self, username, key):
-    #     print("Auth attempt with key: " + u(hexlify(key.get_fingerprint())))
-    #     if (username == "robey") and (key == self.good_pub_key):
-    #         return paramiko.AUTH_SUCCESSFUL
-    #     return paramiko.AUTH_FAILED
-
     def check_auth_gssapi_with_mic(
         self, username, gss_authenticated=paramiko.AUTH_FAILED, cc_file=None
     ):
-        """
-        .. note::
-            We are just checking in `AuthHandler` that the given user is a
-            valid krb5 principal! We don't check if the krb5 principal is
-            allowed to log in on the server, because there is no way to do that
-            in python. So if you develop your own SSH server with paramiko for
-            a certain platform like Linux, you should call ``krb5_kuserok()`` in
-            your local kerberos library to make sure that the krb5_principal
-            has an account on the server and is allowed to log in as a user.
-        .. seealso::
-            `krb5_kuserok() man page
-            <http://www.unix.com/man-page/all/3/krb5_kuserok/>`_
-        """
         if gss_authenticated == paramiko.AUTH_SUCCESSFUL:
             return paramiko.AUTH_SUCCESSFUL
         return paramiko.AUTH_FAILED
@@ -114,10 +71,60 @@ class Server(paramiko.ServerInterface):
     ):
         return True
 
-
-def client_handler(client):
+def convert_arr_to_string(arr):
+    temp=""
+    for sring in arr:
+        temp+=" "+sring
+    return temp
+def client_handler(chan):
     username=""
     channel_open=True
+    f = chan.makefile("rU")
+    while channel_open:
+     command = f.readline().strip("\r\n")
+     parsed_command = shlex.split(command)
+     # print("name of channel is "+chan.get_name())
+     # print(parsed_command)
+     if username!="":
+      if len(parsed_command) > 2 and parsed_command[0] == "msg":
+          receiver_username=parsed_command[1]
+          temp = user_records.query("user_id==@username")
+          if not temp.empty and (receiver_username in messageBox.keys()):
+              messageBox[receiver_username].append(f"[{username}]: "+convert_arr_to_string(parsed_command[2:len(parsed_command)]))
+              print("message to "+receiver_username+" sent")
+              # chan.send("message send\n")
+              server_events_log.write(command+"\n")
+
+      elif len(parsed_command) > 0 and parsed_command[0] == "logout":
+          print("loggin out "+username)
+          del messageBox[chan.get_name()]
+          broad_cast(f"[{username}] logged out")
+          channel_open=False
+          chan.close()
+          server_events_log.write(command + "\n")
+
+     elif len(parsed_command) > 2 and parsed_command[0] == "login" and username=="":
+         tempUserName=parsed_command[1]
+         tempPassword=parsed_command[2]
+         temp = user_records.query("user_id==@tempUserName and password==@tempPassword")
+         if not temp.empty:
+          username=tempUserName
+          print("logging in "+username)
+          chan.set_name(username)
+          messageBox[username]=[]
+          messageBoxHandler = threading.Thread(target=message_box_handler, args=(chan,))
+          messageBoxHandler.start()
+          broad_cast(f"[{username}] logged in")
+          chan.send("\r\n\r\nWelcome!\r\n\r\n")
+          server_events_log.write(command + "\n")
+
+
+def message_box_handler(chan):
+      while chan.get_name() in messageBox.keys() :
+          if len(messageBox[chan.get_name()])!=0:
+              chan.send(messageBox[chan.get_name()].pop(0)+"\n")
+
+def channel_maker(client):
     chan=None
     try:
         t = paramiko.Transport(client, gss_kex=DoGSSAPIKeyExchange)
@@ -133,61 +140,17 @@ def client_handler(client):
             t.start_server(server=server)
         except paramiko.SSHException:
             print("*** SSH negotiation failed.")
-            sys.exit(1)
 
         # wait for auth
         chan = t.accept(20)
         if chan is None:
             print("*** No channel.")
-            sys.exit(1)
         print("Authenticated!")
 
         server.event.wait(10)
         if not server.event.is_set():
             print("*** Client never asked for a shell.")
-            sys.exit(1)
-
-        chan.send("\r\n\r\nWelcome!\r\n\r\n")
-        f = chan.makefile("rU")
-        chan.send("log in please\n")
-        while channel_open:
-         command = f.readline().strip("\r\n")
-         parsed_command = shlex.split(command)
-         print(parsed_command)
-         if username!="":
-
-          while not len(messageBox[username]) == 0:
-              chan.send(messageBox[username].pop(0))
-
-          if len(parsed_command) > 2 and parsed_command[0] == "msg":
-              print("sending a message to someone")
-              receiver_username=parsed_command[1]
-              temp = user_records.query("user_id==@username")
-              if not temp.empty and (receiver_username in messageBox.keys()):
-                  messageBox[receiver_username].append(f"[{username}]: "+parsed_command[2])
-                  print("message to someone sent")
-                  chan.send("message send\n")
-
-          elif len(parsed_command) > 0 and parsed_command[0] == "logout":
-              print("loggin out someone")
-              del messageBox[username]
-              broad_cast(f"[{username}] logged out")
-              channel_open=False
-              chan.close()
-
-
-         elif len(parsed_command) > 2 and parsed_command[0] == "login" and username=="":
-             print("login in someone")
-             tempUserName=parsed_command[1]
-             tempPassword=parsed_command[2]
-             print()
-             temp = user_records.query("user_id==@tempUserName and password==@tempPassword")
-             if not temp.empty:
-              username=tempUserName
-              broad_cast(f"[{username}] logged in")
-              messageBox[username] = []
-              chan.send("logged in\n")
-
+        return chan
     except Exception as e:
         print("*** Caught exception: " + str(e.__class__) + ": " + str(e))
         traceback.print_exc()
@@ -195,8 +158,6 @@ def client_handler(client):
             t.close()
         except:
             pass
-        sys.exit(1)
-
 
 
 def broad_cast(message):
@@ -210,7 +171,8 @@ DoGSSAPIKeyExchange = True
 user_records=pd.read_csv("UserRecords.csv")
 loggedInUsers=set()
 messageBox=dict()
-idToUsername=dict()
+server_events_log= open("server_events.log", "a")
+fuckCount=0
 
 # now connect
 try:
@@ -230,9 +192,10 @@ while True:
  except Exception as e:
      print("*** Listen/accept failed: " + str(e))
      traceback.print_exc()
-     sys.exit(1)
+
 
  print("Got a connection!")
- clientHandler = threading.Thread(target=client_handler, args=(client,))
+ chan=channel_maker(client)
+ clientHandler = threading.Thread(target=client_handler, args=(chan,))
  clientHandler.start()
 

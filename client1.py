@@ -1,26 +1,22 @@
 
-import base64
-from binascii import hexlify
-import getpass
 import os
-import select
 import socket
 import sys
-import time
 import traceback
 from paramiko.py3compat import input
 import interactive
 import paramiko
+import shlex
 
-def manual_auth(username, hostname):
+def manual_auth(username, password):
         # pw = getpass.getpass("Password for %s@%s: " % (username, hostname))
-        t.auth_password(username, "1234q")
+        print(username+":"+password+"\n")
+        t.auth_password(username,password)
 
 
 # setup logging
-paramiko.util.log_to_file("demo.log")
+paramiko.util.log_to_file("client1.log")
 
-# hostname = input("Hostname: ")
 hostname="127.0.0.1"
 port = 22
 # now connect
@@ -50,34 +46,25 @@ try:
             )
         except IOError:
             print("*** Unable to open host keys file")
-        #     keys = {"127.0.0.1":b"AAAAB3NzaC1yc2EAAAABIwAAAIEAyO4it3fHlmGZWJaGrfeHOVY7RWO3P9M7hp"
-        # b"fAu7jJ2d7eothvfeuoRFtJwhUmZDluRdFyhFY/hFAh76PJKGAusIqIQKlkJxMC"
-        # b"KDqIexkgHAfID/6mqvmnSJf0b5W8v5h2pI/stOSwTQ+pxVhwJ9ctYDhRSlF0iT"
-        # b"UWT10hcuO4Ks8="}
-        keys={}
-
     # check server's host key -- this is important.
+    
     key = t.get_remote_server_key()
-    if hostname not in keys:
-        print("*** WARNING: Unknown host key!")
-    elif key.get_name() not in keys[hostname]:
-        print("*** WARNING: Unknown host key!")
-    elif keys[hostname][key.get_name()] != key:
-        print("*** WARNING: Host key has changed!!!")
-        sys.exit(1)
-    else:
-        print("*** Host key OK.")
-    # username = input("enter username: ")
-    username="mahdi"
-    manual_auth(username, hostname)
-    if not t.is_authenticated():
-        print("*** Authentication failed. :(")
-        t.close()
-        sys.exit(1)
-
+    loggedOn=False
+    while not loggedOn:
+     command=input("login please\n")
+     parsed_command = shlex.split(command)
+     if len(parsed_command) > 0 and parsed_command[0] == "login":
+      username = parsed_command[1]
+      password = parsed_command[2]
+      manual_auth(username, password)
+      if not t.is_authenticated():
+          print("*** Authentication failed. :(")
+      else:loggedOn=True
+    print("opened channel")
     chan = t.open_session()
     chan.get_pty()
     chan.invoke_shell()
+    chan.send(command+"\n")
     print("*** Here we go!\n")
     while True:
      interactive.interactive_shell(chan)
