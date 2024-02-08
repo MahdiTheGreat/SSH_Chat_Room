@@ -1,4 +1,3 @@
-
 import os
 import socket
 import sys
@@ -8,16 +7,17 @@ import interactive
 import paramiko
 import shlex
 
+
 def manual_auth(username, password):
-        # pw = getpass.getpass("Password for %s@%s: " % (username, hostname))
-        print(username+":"+password+"\n")
-        t.auth_password(username,password)
+    # pw = getpass.getpass("Password for %s@%s: " % (username, hostname))
+    print(username + ":" + password + "\n")
+    t.auth_password(username, password)
 
 
 # setup logging
-paramiko.util.log_to_file("client2.log")
+paramiko.util.log_to_file("client1.log")
 
-hostname="127.0.0.1"
+hostname = "127.0.0.1"
 port = 22
 # now connect
 try:
@@ -47,26 +47,28 @@ try:
         except IOError:
             print("*** Unable to open host keys file")
     # check server's host key -- this is important.
+
     key = t.get_remote_server_key()
-    loggedOn=False
+    loggedOn = False
     while not loggedOn:
-     command=input("login please\n")
-     parsed_command = shlex.split(command)
-     if len(parsed_command) > 0 and parsed_command[0] == "login":
-      username = parsed_command[1]
-      password = parsed_command[2]
-      manual_auth(username, password)
-      if not t.is_authenticated():
-          print("*** Authentication failed. :(")
-      else:loggedOn=True
+        command = input("login please\n")
+        parsed_command = shlex.split(command)
+        if len(parsed_command) > 0 and parsed_command[0] == "login":
+            username = parsed_command[1]
+            password = parsed_command[2]
+            manual_auth(username, password)
+            if not t.is_authenticated():
+                print("*** Authentication failed. :(")
+            else:
+                loggedOn = True
     print("opened channel")
     chan = t.open_session()
     chan.get_pty()
     chan.invoke_shell()
-    chan.send(command+"\n")
+    chan.send(command + "\n")
     print("*** Here we go!\n")
     while True:
-     interactive.interactive_shell(chan)
+        interactive.interactive_shell(chan)
     chan.close()
     t.close()
 
